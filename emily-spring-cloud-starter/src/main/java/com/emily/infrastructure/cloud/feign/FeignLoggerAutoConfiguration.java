@@ -1,6 +1,7 @@
 package com.emily.infrastructure.cloud.feign;
 
-import com.emily.infrastructure.cloud.feign.interceptor.FeignLoggerMethodInterceptor;
+import com.emily.infrastructure.cloud.feign.interceptor.DefaultFeignLoggerMethodInterceptor;
+import com.emily.infrastructure.cloud.feign.interceptor.FeignLoggerCustomizer;
 import com.emily.infrastructure.cloud.feign.interceptor.FeignRequestInterceptor;
 import com.emily.infrastructure.cloud.feign.loadbalancer.FeignLoggerLoadBalancerLifecycle;
 import com.emily.infrastructure.cloud.feign.logger.FeignLogger;
@@ -14,11 +15,14 @@ import org.springframework.aop.support.annotation.AnnotationMatchingPointcut;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.client.loadbalancer.LoadBalancerDefaultMappingsProviderAutoConfiguration;
+import org.springframework.cloud.commons.config.CommonsConfigAutoConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -46,11 +50,11 @@ public class FeignLoggerAutoConfiguration implements BeanFactoryPostProcessor, I
      */
     @Bean
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-    public Advisor feignAdvisor(FeignLoggerMethodInterceptor interceptor) {
+    public Advisor feignAdvisor(ObjectProvider<FeignLoggerCustomizer> feignLoggerCustomizers) {
         //限定类|方法级别的切点
         Pointcut pointcut = new AnnotationMatchingPointcut(FeignClient.class, RequestMapping.class, true);
         //切面增强类
-        AnnotationPointcutAdvisor advisor = new AnnotationPointcutAdvisor(interceptor, pointcut);
+        AnnotationPointcutAdvisor advisor = new AnnotationPointcutAdvisor(feignLoggerCustomizers.orderedStream().findFirst().get(), pointcut);
         //设置增强拦截器执行顺序
         advisor.setOrder(AopOrderInfo.FEIGN);
         return advisor;
@@ -58,8 +62,8 @@ public class FeignLoggerAutoConfiguration implements BeanFactoryPostProcessor, I
 
     @Bean
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-    public FeignLoggerMethodInterceptor feignLoggerMethodInterceptor() {
-        return new FeignLoggerMethodInterceptor();
+    public DefaultFeignLoggerMethodInterceptor feignLoggerMethodInterceptor() {
+        return new DefaultFeignLoggerMethodInterceptor();
     }
 
     /**
@@ -93,6 +97,22 @@ public class FeignLoggerAutoConfiguration implements BeanFactoryPostProcessor, I
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
         if (beanFactory.containsBeanDefinition(RetryConfiguration.class.getName())) {
             BeanDefinition beanDefinition = beanFactory.getBeanDefinition(RetryConfiguration.class.getName());
+            beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+        }
+        if (beanFactory.containsBeanDefinition(CommonsConfigAutoConfiguration.class.getName())) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(CommonsConfigAutoConfiguration.class.getName());
+            beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+        }
+        if (beanFactory.containsBeanDefinition(LoadBalancerDefaultMappingsProviderAutoConfiguration.class.getName())) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(LoadBalancerDefaultMappingsProviderAutoConfiguration.class.getName());
+            beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+        }
+        if (beanFactory.containsBeanDefinition("loadBalancerClientsDefaultsMappingsProvider")) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition("loadBalancerClientsDefaultsMappingsProvider");
+            beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
+        }
+        if (beanFactory.containsBeanDefinition("defaultsBindHandlerAdvisor")) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition("defaultsBindHandlerAdvisor");
             beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
         }
     }

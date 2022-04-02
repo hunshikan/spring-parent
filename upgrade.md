@@ -1,5 +1,38 @@
 ### 
 -----
+基础库发布4.0.10
+Bug Fixes
+1. springboot升级到2.6.6
+-----
+基础库发布4.0.9
+Bug Fixes
+1. 优化异常统一处理
+2. 控制器请求在url转换阶段所报的异常记录到日志平台；
+3. 数据库多数据源组件去除getDataSource方法，优化默认拦截器，支持两种扩展点方案；
+4. transmittable-thread-local版本升级到2.12.6
+5. IOCContext新增getBeansOfType方法支持获取一个类的所有实例对象
+6. 动态数据库多数据源组件新增resolveSpecifiedLookupKey方法，优化初始化动态切换实例对象；
+7. 动态数据库多数据源组件新增resolveSpecifiedLookupKey方法根据不同的条件切换数据源；
+8. 动态多数据源属性配置优化调整，新增默认数据源配置判定
+-----
+基础库发布4.0.8
+Bug Fixes
+1. 扩展点默认拦截器命名前加Default
+2. 优化Feign扩展点
+3. Mybatis方法请求参数优化调整，提取到公共获取参数类RequestHelper中；
+4. com.emily.infrastructure.core.config.properties.PropertyService,com.emily.infrastructure.core.config.ConfEnvironmentPostProcessor,
+com.emily.infrastructure.core.config.EmilyOriginTrackedPropertiesLoader,com.emily.infrastructure.core.config.EmilyPropertiesPropertySourceLoader
+四个类删除；
+5. 上下文配置类名称变更，TraceContextHolder名称变更为ContextHolder;
+6. IOCContext类优化实现ApplicationContextInitializer初始化接口，删除自定义初始化类，调整IOCContext类包路径
+7. druid多数据源属性配置原理分析，添加多数据源守护线程
+8. 升级springboot到2.6.4版本
+9. 新增com.emily.infrastructure.common.utils.StrUtils.replaceChar字符串工具方法
+10. 优化ContextHolder移除当前线程持有的变量方法
+11. 优化数据库中间件，新增扩展点before、after方法
+12. 新增LRUCache类
+13. 动态数据库多数据源中间件支持Hikari数据库连接池，无需任何代码层面调整就可以自动切换使用不同的数据库连接池
+-----
 基础库发布4.0.7
 Bug Fixes
 1. 优化数据源注解@TargetDataSource注解说明
@@ -10,7 +43,12 @@ Bug Fixes
 6. 自动化配置中 @ConditionalOnBean(xx.class)注解使用去除，解决不可加载问题
 7. 全链路日志追踪在多线程池化时会重新创建事务编号问题解决
 8. 日志组件新增初始化类LogbackApplicationContextInitializer类，在项目启动时即初始化日志组件，即程序启动时最先加载日志组件，防止系统日志打印丢失
-
+9. 多数据源统一拦截器父接口，其实现了Ordered接口，AOP切面会根据优先级顺序启用优先级最高的拦截器  
+10. API请求日志拦截器扩展接口，其实现Ordered接口，AOP切面会根据优先级顺序取优先级最高的拦截器
+11. RestTemplate拦截器接口，新增Ordered实现，AOP切面会取优先级最高
+12. mybatis-spring-boot-starter版本升级到2.2.2
+13. Feign日志拦截器通用接口，新增Ordered接口实现，AOP切面回去优先级最高的
+14. Mybatis提供扩展点接口
 -----
 基础库发布4.0.6
 Bug Fixes

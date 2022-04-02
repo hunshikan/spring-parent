@@ -3,7 +3,8 @@ package com.emily.infrastructure.mybatis;
 import com.emily.infrastructure.common.constant.AopOrderInfo;
 import com.emily.infrastructure.core.aop.advisor.AnnotationPointcutAdvisor;
 import com.emily.infrastructure.logger.LoggerFactory;
-import com.emily.infrastructure.mybatis.interceptor.MybatisMethodInterceptor;
+import com.emily.infrastructure.mybatis.interceptor.DefaultMybatisMethodInterceptor;
+import com.emily.infrastructure.mybatis.interceptor.MybatisCustomizer;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.apache.ibatis.annotations.Mapper;
 import org.slf4j.Logger;
@@ -14,16 +15,16 @@ import org.springframework.aop.support.annotation.AnnotationMatchingPointcut;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Role;
-
-import java.text.MessageFormat;
 
 /**
  * @Description: 控制器切点配置
@@ -31,9 +32,9 @@ import java.text.MessageFormat;
  * @Version: 1.0
  */
 @Configuration
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 @EnableConfigurationProperties(MybatisProperties.class)
 @ConditionalOnProperty(prefix = MybatisProperties.PREFIX, name = "enabled", havingValue = "true", matchIfMissing = true)
-@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 public class MybatisAutoConfiguration implements BeanFactoryPostProcessor, InitializingBean, DisposableBean {
 
     private static final Logger logger = LoggerFactory.getLogger(MybatisAutoConfiguration.class);
@@ -47,7 +48,7 @@ public class MybatisAutoConfiguration implements BeanFactoryPostProcessor, Initi
      */
     @Bean
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-    public Advisor mybatisLogAdvisor(MybatisProperties properties) {
+    public Advisor mybatisLogAdvisor(ObjectProvider<MybatisCustomizer> mybatisCustomizers, MybatisProperties properties) {
         //限定类级别的切点
         Pointcut cpc = new AnnotationMatchingPointcut(Mapper.class, properties.isCheckInherited());
         //限定方法级别的切点
@@ -55,12 +56,19 @@ public class MybatisAutoConfiguration implements BeanFactoryPostProcessor, Initi
         //组合切面(并集)，即只要有一个切点的条件符合，则就拦截
         Pointcut pointcut = new ComposablePointcut(cpc).union(mpc);
         //mybatis日志拦截切面
-        MethodInterceptor interceptor = new MybatisMethodInterceptor();
+        MethodInterceptor interceptor = mybatisCustomizers.orderedStream().findFirst().get();
         //切面增强类
         AnnotationPointcutAdvisor advisor = new AnnotationPointcutAdvisor(interceptor, pointcut);
         //切面优先级顺序
         advisor.setOrder(AopOrderInfo.MYBATIS);
         return advisor;
+    }
+
+    @Bean
+    @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+    @ConditionalOnMissingBean
+    public MybatisCustomizer mybatisCustomizer() {
+        return new DefaultMybatisMethodInterceptor();
     }
 
     /**
@@ -71,9 +79,9 @@ public class MybatisAutoConfiguration implements BeanFactoryPostProcessor, Initi
      */
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-        String beanName = MessageFormat.format("{0}-{1}", MybatisProperties.PREFIX, MybatisProperties.class.getName());
-        if (beanFactory.containsBeanDefinition(beanName)) {
-            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanName);
+        String[] beanNames = beanFactory.getBeanNamesForType(MybatisProperties.class);
+        if (beanNames.length > 0 && beanFactory.containsBeanDefinition(beanNames[0])) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanNames[0]);
             beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
         }
     }

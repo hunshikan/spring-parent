@@ -1,6 +1,6 @@
 package com.emily.infrastructure.core.helper;
 
-import com.emily.infrastructure.core.ioc.IOCContext;
+import com.emily.infrastructure.core.context.ioc.IOCContext;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /**
@@ -19,7 +19,7 @@ public class ThreadPoolHelper {
         try {
             return IOCContext.getBean(ThreadPoolTaskExecutor.class);
         } catch (Exception exception) {
-            ThreadPoolTaskExecutor threadPoolTaskExecutor= new ThreadPoolTaskExecutor();
+            ThreadPoolTaskExecutor threadPoolTaskExecutor = new ThreadPoolTaskExecutor();
             threadPoolTaskExecutor.setCorePoolSize(8);
             threadPoolTaskExecutor.setMaxPoolSize(64);
             threadPoolTaskExecutor.setQueueCapacity(10000);

@@ -1,6 +1,5 @@
 package com.emily.infrastructure.datasource;
 
-import com.alibaba.druid.pool.DruidDataSource;
 import com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure;
 import com.alibaba.druid.spring.boot.autoconfigure.properties.DruidStatProperties;
 import com.alibaba.druid.spring.boot.autoconfigure.stat.DruidSpringAopConfiguration;
@@ -10,7 +9,8 @@ import com.emily.infrastructure.datasource.annotation.TargetDataSource;
 import com.emily.infrastructure.datasource.context.DynamicMultipleDataSources;
 import com.emily.infrastructure.datasource.exception.DataSourceNotFoundException;
 import com.emily.infrastructure.datasource.interceptor.DataSourceCustomizer;
-import com.emily.infrastructure.datasource.interceptor.DataSourceMethodInterceptor;
+import com.emily.infrastructure.datasource.interceptor.DefaultDataSourceMethodInterceptor;
+import com.emily.infrastructure.datasource.thread.DataSourceDaemonThread;
 import com.emily.infrastructure.logger.LoggerFactory;
 import org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration;
 import org.slf4j.Logger;
@@ -26,30 +26,31 @@ import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfigureBefore;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Role;
-import org.springframework.core.annotation.Order;
+import org.springframework.util.Assert;
 
 import javax.sql.DataSource;
-import java.text.MessageFormat;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
 /**
+ * Oracle数据库PSCache解决方案：https://github.com/alibaba/druid/wiki/Oracle%E6%95%B0%E6%8D%AE%E5%BA%93%E4%B8%8BPreparedStatementCache%E5%86%85%E5%AD%98%E9%97%AE%E9%A2%98%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88
+ *
  * @Description: 控制器切点配置
  * @Author Emily
- * @Version: 1.0
+ * @since 4.0.8
  */
 @Configuration
+@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 @AutoConfigureBefore(DruidDataSourceAutoConfigure.class)
 @EnableConfigurationProperties(DataSourceProperties.class)
 @ConditionalOnProperty(prefix = DataSourceProperties.PREFIX, name = "enabled", havingValue = "true", matchIfMissing = true)
-@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 public class DataSourceAutoConfiguration implements BeanFactoryPostProcessor, InitializingBean, DisposableBean {
 
     private static final Logger logger = LoggerFactory.getLogger(DataSourceAutoConfiguration.class);
@@ -76,14 +77,16 @@ public class DataSourceAutoConfiguration implements BeanFactoryPostProcessor, In
         AnnotationPointcutAdvisor advisor = new AnnotationPointcutAdvisor(dataSourceCustomizers.orderedStream().findFirst().get(), pointcut);
         //切面优先级顺序
         advisor.setOrder(AopOrderInfo.DATASOURCE);
+        //数据源守护线程
+        createDataSourceDaemonThread(properties);
         return advisor;
     }
 
     @Bean
-    @Order(AopOrderInfo.DATASOURCE_INTERCEPTOR)
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-    public DataSourceMethodInterceptor dataSourceMethodInterceptor(DataSourceProperties dataSourceProperties) {
-        return new DataSourceMethodInterceptor(dataSourceProperties);
+    @ConditionalOnMissingBean
+    public DataSourceCustomizer dataSourceCustomizer(DataSourceProperties dataSourceProperties) {
+        return new DefaultDataSourceMethodInterceptor(dataSourceProperties);
     }
 
     /**
@@ -94,16 +97,20 @@ public class DataSourceAutoConfiguration implements BeanFactoryPostProcessor, In
     @Bean
     @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
     public DataSource dynamicMultipleDataSources(DataSourceProperties dataSourceProperties) {
-        Map<String, DruidDataSource> configs = dataSourceProperties.getConfig();
-        if (Objects.isNull(dataSourceProperties.getDefaultConfig())) {
-            throw new DataSourceNotFoundException("默认数据库必须配置");
-        }
-        if (configs.isEmpty()) {
-            throw new DataSourceNotFoundException("数据库配置不存在");
-        }
-        Map<Object, Object> targetDataSources = new HashMap<>(configs.size());
-        configs.keySet().forEach(key -> targetDataSources.put(key, configs.get(key)));
-        return DynamicMultipleDataSources.build(dataSourceProperties.getDefaultDataSource(), targetDataSources);
+        Assert.notNull(dataSourceProperties.getDefaultTargetDataSource(), "默认数据库必须配置");
+        //动态切换多数据源对象
+        DynamicMultipleDataSources dynamicMultipleDataSources = new DynamicMultipleDataSources();
+        //如果存在默认数据源，指定默认的目标数据源；映射的值可以是javax.sql.DataSource或者是数据源（data source）字符串；如果setTargetDataSources指定的数据源不存在，将会使用默认的数据源
+        dynamicMultipleDataSources.setDefaultTargetDataSource(dataSourceProperties.getDefaultTargetDataSource());
+        //指定目标数据源的Map集合映射，使用查找键（Look Up Key）作为Key,这个Map集合的映射Value可以是javax.sql.DataSource或者是数据源（data source）字符串；集合的Key可以为任何数据类型，当前类会通过泛型的方式来实现查找，
+        dynamicMultipleDataSources.setTargetDataSources(dataSourceProperties.getTargetDataSources());
+        //是否对默认数据源执行宽松回退，即：当目标数据源找不到时回退到默认数据源，默认：true
+        dynamicMultipleDataSources.setLenientFallback(dataSourceProperties.isLenientFallback());
+        //设置DataSourceLookup为解析数据源的字符串，默认是使用JndiDataSourceLookup；允许直接指定应用程序服务器数据源的JNDI名称；
+        dynamicMultipleDataSources.setDataSourceLookup(null);
+        //将设置的默认数据源、目标数据源解析为真实的数据源对象赋值给resolvedDefaultDataSource变量和resolvedDataSources变量
+        dynamicMultipleDataSources.afterPropertiesSet();
+        return dynamicMultipleDataSources;
     }
 
     /**
@@ -114,24 +121,34 @@ public class DataSourceAutoConfiguration implements BeanFactoryPostProcessor, In
      */
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-        String beanName = MessageFormat.format("{0}-{1}", DataSourceProperties.PREFIX, DataSourceProperties.class.getName());
-        if (beanFactory.containsBeanDefinition(beanName)) {
-            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanName);
+        String[] beanNames = beanFactory.getBeanNamesForType(DataSourceProperties.class);
+        if (beanNames.length > 0 && beanFactory.containsBeanDefinition(beanNames[0])) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanNames[0]);
             beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
         }
 
-        beanName = DruidSpringAopConfiguration.class.getName();
-        if (beanFactory.containsBeanDefinition(beanName)) {
-            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanName);
+        if (beanFactory.containsBeanDefinition(DruidSpringAopConfiguration.class.getName())) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(DruidSpringAopConfiguration.class.getName());
             beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
         }
 
-        beanName = MessageFormat.format("{0}-{1}", "spring.datasource.druid", DruidStatProperties.class.getName());
-        if (beanFactory.containsBeanDefinition(beanName)) {
-            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanName);
+        beanNames = beanFactory.getBeanNamesForType(DruidStatProperties.class);
+        if (beanNames.length > 0 && beanFactory.containsBeanDefinition(beanNames[0])) {
+            BeanDefinition beanDefinition = beanFactory.getBeanDefinition(beanNames[0]);
             beanDefinition.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
         }
 
+    }
+
+    /**
+     * 创建守护线程
+     *
+     * @param properties
+     */
+    private void createDataSourceDaemonThread(DataSourceProperties properties) {
+        //数据源守护线程
+        Thread thread = new DataSourceDaemonThread("dataSource", properties);
+        thread.start();
     }
 
     @Override
